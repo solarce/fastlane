@@ -14,14 +14,15 @@ module Snapshot
       end
 
       UI.abort_with_message!("User cancelled action") unless sure
-
-      devices.each do |device|
+      d = devices
+      d.each do |device|
         _, name, id = device
         puts "Removing device #{name} (#{id})"
         `xcrun simctl delete #{id}`
       end
 
-      all_runtime_type = `xcrun simctl list runtimes`.scan(/(.*)\s\(.*\((.*)\)/)
+      ios_versions = ["8.1", "8.2", "8.3", "8.4", "9.0", "9.1", "9.2", "9.3", "10.0", "10.1", "10.2", "10.3", "11.0"]
+      all_runtime_type = `xcrun simctl list runtimes`.scan(/(.*)\s\(.*\).*(com.*)/)
       # == Runtimes ==
       # iOS 9.3 (9.3 - 13E233) (com.apple.CoreSimulator.SimRuntime.iOS-9-3)
       # iOS 10.0 (10.0 - 14A345) (com.apple.CoreSimulator.SimRuntime.iOS-10-0)
@@ -49,7 +50,7 @@ module Snapshot
         end
       end
 
-      make_phone_watch_pair
+      make_phone_watch_pair(d)
     end
 
     def self.create(device_type, os_versions, os_name = 'iOS')
@@ -80,18 +81,52 @@ module Snapshot
       result.select { |parsed| parsed.length == 3 } # we don't care about those headers
     end
 
-    def self.make_phone_watch_pair
-      phones = []
-      watches = []
-      devices.each do |device|
+    def self.make_phone_watch_pair(d)
+      installed_phones = []
+      installed_watches = []
+      xcode_version = `xcodebuild -version`
+      d.each do |device|
         full_line, name, id = device
-        phones << id if name.start_with?('iPhone 6') && device_line_usable?(full_line)
-        watches << id if name.end_with?('mm') && device_line_usable?(full_line)
+        if xcode_version.include?("Xcode 9")
+          if name.start_with?('iPhone 6s') && device_line_usable?(full_line)
+            installed_phones << [name.to_s,id]
+          elsif name.start_with?('iPhone 7') && device_line_usable?(full_line)
+            installed_phones << [name,id]
+          elsif name.end_with?('mm') && device_line_usable?(full_line)
+            installed_watches << [name,id]
+          end
+        else
+          installed_phones << id if name.start_with?('iPhone 6') && device_line_usable?(full_line)
+          installed_watches << id if name.end_with?('mm') && device_line_usable?(full_line)
+        end
       end
 
-      if phones.any? && watches.any?
-        puts "Creating device pair of #{phones.last} and #{watches.last}"
-        Helper.backticks("xcrun simctl pair #{watches.last} #{phones.last}", print: FastlaneCore::Globals.verbose?)
+      phone_pair_names = { "iPhone 6s":[], "iPhone 6s Plus":[], "iPhone 7":[], "iPhone 7 Plus":[]}
+      watch_pair_names = {"Apple Watch - 38mm":[],"Apple Watch Series 2 - 38mm":[], "Apple Watch - 42mm":[],"Apple Watch Series 2 - 42mm":[]}
+
+      phone_pair_names.each do | name,id_list |
+        installed_phones.each do | phone |
+          if name.to_s == phone[0]
+            phone_pair_names[name] << phone[1]
+          end
+        end
+        phone_pair_names[name] = phone_pair_names[name].last
+      end
+      watch_pair_names.each do | name,id_list |
+        installed_watches.each do | watch |
+          if name.to_s == watch[0]
+            watch_pair_names[name] << watch[1]
+          end
+        end
+        watch_pair_names[name] = watch_pair_names[name].last
+      end
+
+      phone_pair_names.each do | phone_name,phone_id |
+        watch_pair_names.each do | watch_name,watch_id |
+          puts "Creating device pair of #{phone_name} and #{watch_name}"
+          puts "xcrun simctl pair #{phone_id} #{watch_id}"
+          Helper.backticks("xcrun simctl pair #{watch_id} #{phone_id}", print: FastlaneCore::Globals.verbose?)
+        end
       end
     end
 
